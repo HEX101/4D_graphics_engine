@@ -111,84 +111,54 @@ class Shape:
         return Shape(vertices, edges_array)
 
 class Rotation: # generlize to apply to n dimensions
-    def __init__(self, yaw: float = 0.0, pitch: float = 0.0, roll: float = 0.0, w_rotation: float = 0.0) -> None:
+    def __init__(self, yaw: float = 0.0, pitch: float = 0.0, roll: float = 0.0) -> None:
         self.yaw = yaw                  # Rotation around YZ plane
         self.pitch = pitch              # Rotation around XZ plane
         self.roll = roll                # Rotation around XY plane
-        self.w_rotation = w_rotation    # Rotation involving the W dimension
         self.rotation_speed: float = math.pi / 16
         self.has_changed: bool = True
 
     def rotate_camera(self, dtheta: float = 0.0, dphi: float = 0.0, dw: float = 0.0) -> None:
         self.yaw += dtheta * self.rotation_speed
         self.pitch += dphi * self.rotation_speed
-        self.w_rotation += dw * self.rotation_speed
         self.has_changed = True 
 
-    def rotate_xy(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_theta = math.sin(self.yaw)
-        cos_theta = math.cos(self.yaw)
-        rot_xy = np.array([[cos_theta, -sin_theta, 0, 0],
-                           [sin_theta, cos_theta, 0, 0],
-                           [0, 0, 1, 0],
-                           [0, 0, 0, 1]])
-        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_xy)
-        return rotated_coordinates
+    def rotate_y(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
+        sin_theta: float = math.sin(self.yaw)
+        cos_theta: float = math.cos(self.yaw)
+        roty: NDArray[np.float64] = np.array([[cos_theta, 0, -sin_theta],
+                                             [0, 1, 0],
+                                             [sin_theta, 0, cos_theta]])
+        rotated_vertices: NDArray[np.float64] = np.dot(vertices, roty)
+        return rotated_vertices
 
-    def rotate_xz(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_phi = math.sin(self.pitch)
-        cos_phi = math.cos(self.pitch)
-        rot_xz: NDArray[np.float64] = np.array([[cos_phi, 0, -sin_phi, 0],
-                           [0, 1, 0, 0],
-                           [sin_phi, 0, cos_phi, 0],
-                           [0, 0, 0, 1]])
-        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_xz)
-        return rotated_coordinates
-
-    # Rotate around the XW plane (4D rotation)
-    def rotate_xw(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_w = math.sin(self.w_rotation)
-        cos_w = math.cos(self.w_rotation)
-        rot_xw: NDArray[np.float64] = np.array([[cos_w, 0, 0, -sin_w],
-                           [0, 1, 0, 0],
-                           [0, 0, 1, 0],
-                           [sin_w, 0, 0, cos_w]])
-        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_xw)
-        return rotated_coordinates
-
-    # Rotate around the YW plane (4D rotation)
-    def rotate_yw(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_w = math.sin(self.w_rotation)
-        cos_w = math.cos(self.w_rotation)
-        rot_yw = np.array([[1, 0, 0, 0],
-                           [0, cos_w, 0, -sin_w],
-                           [0, 0, 1, 0],
-                           [0, sin_w, 0, cos_w]])
-        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_yw)
-        return rotated_coordinates
-
-    # Rotate around the ZW plane (4D rotation)
-    def rotate_zw(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_w = math.sin(self.w_rotation)
-        cos_w = math.cos(self.w_rotation)
-        rot_zw = np.array([[1, 0, 0, 0],
-                           [0, 1, 0, 0],
-                           [0, 0, cos_w, -sin_w],
-                           [0, 0, sin_w, cos_w]])
-        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_zw)
-        return rotated_coordinates
+    def rotate_x(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
+        sin_phi: float = math.sin(self.pitch)
+        cos_phi: float = math.cos(self.pitch)
+        rotx: NDArray[np.float64] = np.array([[1, 0, 0],
+                                             [0, cos_phi, -sin_phi],
+                                             [0, sin_phi, cos_phi]])
+        rotated_vertices: NDArray[np.float64] = np.dot(vertices, rotx)
+        return rotated_vertices
+    
+    def rotate_z(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
+        sin_psi: float = math.sin(self.roll)
+        cos_psi: float = math.cos(self.roll)
+        
+        rotz: NDArray[np.float64] = np.array([[cos_psi, -sin_psi, 0],
+                                            [sin_psi, cos_psi, 0],
+                                            [0, 0, 1, 0]])
+        rotated_vertices: NDArray[np.float64] = np.dot(vertices, rotz)
+        return rotated_vertices
 
     def rotate(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        rotated = self.rotate_xy(vertices)
-        rotated = self.rotate_xz(rotated)
-        rotated = self.rotate_xw(rotated)
-        rotated = self.rotate_yw(rotated)
-        rotated = self.rotate_zw(rotated)
+        rotated = self.rotate_y(vertices)
+        rotated = self.rotate_x(rotated)
         return rotated
     
 class Position:
-    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0, w: float = 0.0) -> None:
-        self.coords: NDArray[np.float64] = np.array([x, y, z, w])
+    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
+        self.coords: NDArray[np.float64] = np.array([x, y, z])
         self.movement_speed: float = 0.1
         self.has_changed: bool = True
         
@@ -205,10 +175,8 @@ class InputHandler:         # generlize for n dimensions
             ord('s'): lambda: self.rotation.rotate_camera(dphi=1),   # Rotate down (pitch increase)
             ord('a'): lambda: self.rotation.rotate_camera(dtheta=1), # Rotate left (yaw increase)
             ord('d'): lambda: self.rotation.rotate_camera(dtheta=-1),# Rotate right (yaw decrease)
-            ord('z'): lambda: self.position.move(np.array([0.0, 0.0, -1.0, 0.0])),  # Move forward (Z axis)
-            ord('x'): lambda: self.position.move(np.array([0.0, 0.0, 1.0, 0.0])),   # Move backward (Z axis)
-            ord('f'): lambda: self.position.move(np.array([0.0, 0.0, 0.0, 1.0])),  # Move forward (X axis)
-            ord('g'): lambda: self.position.move(np.array([0.0, 0.0, 0.0, -1.0])),   # Move backward (X axis)
+            ord('z'): lambda: self.position.move(np.array([0.0, 0.0, -1.0])),  # Move forward (Z axis)
+            ord('x'): lambda: self.position.move(np.array([0.0, 0.0, 1.0])),   # Move backward (Z axis)
         }
 
     def handle_input(self, key: int) -> None:
@@ -255,7 +223,7 @@ class Application:
             self.input_handler.handle_input(key)
             
 def main() -> None:
-    app = Application(n=4)
+    app = Application(n=3)
     curses.wrapper(app.run)
 
 if __name__ == "__main__":
