@@ -1,0 +1,5 @@
+-  CLIPPING ALGO
+-  Regular non orbit movement
+-  Fix oging to close to the cube crash
+-  implment 4d
+-  custom rendered with opengl
