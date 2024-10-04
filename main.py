@@ -1,16 +1,18 @@
-import numpy as np
 import curses
-import math
 import itertools
+import math
+from typing import Callable, Dict, Optional
+
+import numpy as np
 from numpy.typing import NDArray
-from typing import Callable, Optional, Dict
+
 
 class Projection:
-    def __init__(self, max_x, max_y) -> None:
+    def __init__(self, max_x: int, max_y: int) -> None:
         self.max_x = max_x
         self.max_y = max_y
         
-    def project_vertices(self, vertices: NDArray[np.float_], position: NDArray[np.float_]) -> NDArray[np.int_]:
+    def project_vertices(self, vertices: NDArray[np.float64], position: NDArray[np.float64]) -> NDArray[np.int_]:
         dimension_to_project_to: int = 2
 
         num_vertices = vertices.shape[0]
@@ -82,13 +84,13 @@ class Renderer:
         self.stdscr.refresh()
 
 class Shape:
-    def __init__(self, vertices: NDArray[np.float_], edges: NDArray[np.int_]) -> None:
-        self.vertices: NDArray[np.float_] = vertices
+    def __init__(self, vertices: NDArray[np.float64], edges: NDArray[np.int_]) -> None:
+        self.vertices: NDArray[np.float64] = vertices
         self.edges: NDArray[np.int_] = edges
             
     @staticmethod
     def define_n_dimensional_cube(n: int) -> 'Shape':        
-        vertices = np.array(list(itertools.product([-1, 1], repeat=n)), dtype=np.float_)
+        vertices = np.array(list(itertools.product([-1, 1], repeat=n)), dtype=np.float64)
 
         edges = []
         dimension = vertices.shape[1]
@@ -123,55 +125,60 @@ class Rotation: # generlize to apply to n dimensions
         self.w_rotation += dw * self.rotation_speed
         self.has_changed = True 
 
-    def rotate_xy(self, vertices: NDArray[np.float_]) -> NDArray[np.float_]:
+    def rotate_xy(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
         sin_theta = math.sin(self.yaw)
         cos_theta = math.cos(self.yaw)
         rot_xy = np.array([[cos_theta, -sin_theta, 0, 0],
                            [sin_theta, cos_theta, 0, 0],
                            [0, 0, 1, 0],
                            [0, 0, 0, 1]])
-        return np.dot(vertices, rot_xy)
+        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_xy)
+        return rotated_coordinates
 
-    def rotate_xz(self, vertices: NDArray[np.float_]) -> NDArray[np.float_]:
+    def rotate_xz(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
         sin_phi = math.sin(self.pitch)
         cos_phi = math.cos(self.pitch)
-        rot_xz = np.array([[cos_phi, 0, -sin_phi, 0],
+        rot_xz: NDArray[np.float64] = np.array([[cos_phi, 0, -sin_phi, 0],
                            [0, 1, 0, 0],
                            [sin_phi, 0, cos_phi, 0],
                            [0, 0, 0, 1]])
-        return np.dot(vertices, rot_xz)
+        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_xz)
+        return rotated_coordinates
 
     # Rotate around the XW plane (4D rotation)
-    def rotate_xw(self, vertices: NDArray[np.float_]) -> NDArray[np.float_]:
+    def rotate_xw(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
         sin_w = math.sin(self.w_rotation)
         cos_w = math.cos(self.w_rotation)
-        rot_xw = np.array([[cos_w, 0, 0, -sin_w],
+        rot_xw: NDArray[np.float64] = np.array([[cos_w, 0, 0, -sin_w],
                            [0, 1, 0, 0],
                            [0, 0, 1, 0],
                            [sin_w, 0, 0, cos_w]])
-        return np.dot(vertices, rot_xw)
+        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_xw)
+        return rotated_coordinates
 
     # Rotate around the YW plane (4D rotation)
-    def rotate_yw(self, vertices: NDArray[np.float_]) -> NDArray[np.float_]:
+    def rotate_yw(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
         sin_w = math.sin(self.w_rotation)
         cos_w = math.cos(self.w_rotation)
         rot_yw = np.array([[1, 0, 0, 0],
                            [0, cos_w, 0, -sin_w],
                            [0, 0, 1, 0],
                            [0, sin_w, 0, cos_w]])
-        return np.dot(vertices, rot_yw)
+        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_yw)
+        return rotated_coordinates
 
     # Rotate around the ZW plane (4D rotation)
-    def rotate_zw(self, vertices: NDArray[np.float_]) -> NDArray[np.float_]:
+    def rotate_zw(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
         sin_w = math.sin(self.w_rotation)
         cos_w = math.cos(self.w_rotation)
         rot_zw = np.array([[1, 0, 0, 0],
                            [0, 1, 0, 0],
                            [0, 0, cos_w, -sin_w],
                            [0, 0, sin_w, cos_w]])
-        return np.dot(vertices, rot_zw)
+        rotated_coordinates: NDArray[np.float64] = np.dot(vertices, rot_zw)
+        return rotated_coordinates
 
-    def rotate(self, vertices: NDArray[np.float_]) -> NDArray[np.float_]:
+    def rotate(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
         rotated = self.rotate_xy(vertices)
         rotated = self.rotate_xz(rotated)
         rotated = self.rotate_xw(rotated)
@@ -181,16 +188,15 @@ class Rotation: # generlize to apply to n dimensions
     
 class Position:
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0, w: float = 0.0) -> None:
-        self.coords: NDArray[np.float_] = np.array([x, y, z, w])
+        self.coords: NDArray[np.float64] = np.array([x, y, z, w])
         self.movement_speed: float = 0.1
         self.has_changed: bool = True
         
-    def move(self, direction_vector: NDArray[np.float_]) -> None:
+    def move(self, direction_vector: NDArray[np.float64]) -> None:
         self.coords += direction_vector * self.movement_speed
         self.has_changed = True
 
-
-class InputHandler:
+class InputHandler:         # generlize for n dimensions
     def __init__(self, position: Position, rotation: Rotation) -> None:
         self.position = position
         self.rotation = rotation
@@ -211,7 +217,7 @@ class InputHandler:
             action()
 
 class Application:
-    def __init__(self, n) -> None:
+    def __init__(self, n: int) -> None:
         self.shape: Shape = Shape.define_n_dimensional_cube(n)
         self.position: Position = Position(z=3)
         self.rotation: Rotation = Rotation()
@@ -231,7 +237,7 @@ class Application:
                 stdscr.addstr(0, 0, f'X: {self.position.coords[0]:.2f}, Z: {self.position.coords[2]:.2f}', curses.color_pair(1))
                 stdscr.addstr(1, 0, f'Yaw: {round((self.rotation.yaw * (180 / math.pi) % 360), 2)}, Pitch: {round((self.rotation.pitch * (180 / math.pi) % 360), 2)}', curses.color_pair(1))
                 
-                rotated: NDArray[np.float_] = self.rotation.rotate(self.shape.vertices)
+                rotated: NDArray[np.float64] = self.rotation.rotate(self.shape.vertices)
                 rotated[:, :2] -= self.position.coords[:2]
                 projected: NDArray[np.int_] = self.projection.project_vertices(
                     rotated, self.position.coords
