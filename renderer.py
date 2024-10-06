@@ -1,41 +1,57 @@
-import glfw
-from OpenGL.GL import glBegin, glEnd, glColor3f, glVertex2f, glClear, glOrtho, GL_POINTS, GL_COLOR_BUFFER_BIT
+import ctypes
 
-def initialize_window(width: int, height: int) -> glfw._GLFWwindow | None:
-    if not glfw.init():
-        return None
-    window = glfw.create_window(width, height, "Pixel Drawer", None, None)
-    if not window:
-        glfw.terminate()
-        return None
-    glfw.make_context_current(window)
-    return window
+import numpy as np
+import sdl2
+import sdl2.ext
+from numpy.typing import NDArray
 
-def draw_pixel(x: float, y: float, r: float, g: float, b: float) -> None:
-    glBegin(GL_POINTS)
-    glColor3f(r, g, b)
-    glVertex2f(x, y)
-    glEnd()
 
-def main() -> None:
-    width, height = 800, 600
-    window = initialize_window(width, height)
-    if not window:
-        return
+class Renderer:
+    def __init__(self, window: sdl2.SDL_Window, renderer: sdl2.SDL_Renderer) -> None:
+        self.window = window
+        self.renderer = renderer
+        self.max_x = ctypes.c_int()
+        self.max_y = ctypes.c_int()
+        sdl2.SDL_GetWindowSize(window, self.max_x, self.max_y)
 
-    glOrtho(0, width, 0, height, -1, 1)
+    def draw_edges(self, projected: NDArray[np.int_], edges: NDArray[np.int_]) -> None:
+        sdl2.SDL_SetRenderDrawColor(self.renderer, 255, 255, 255, 255)
+        for e in edges:
+            if e[0] >= len(projected) or e[1] >= len(projected):
+                continue
 
-    while not glfw.window_should_close(window):
-        glClear(GL_COLOR_BUFFER_BIT)
-        
-        draw_pixel(100, 100, 1.0, 0.0, 0.0)
-        draw_pixel(200, 200, 0.0, 1.0, 0.0)
-        draw_pixel(300, 300, 0.0, 0.0, 1.0)
+            v1 = projected[e[0]]
+            v2 = projected[e[1]]
 
-        glfw.swap_buffers(window)
-        glfw.poll_events()
+            self.draw_line(v1, v2)
+                    
+    def draw_line(self, v1: NDArray[np.int_], v2: NDArray[np.int_]) -> None:
+        x1, y1 = v1[0], v1[1]
+        x2, y2 = v2[0], v2[1]
 
-    glfw.terminate()
+        dx: int = abs(x2 - x1)
+        dy: int = abs(y2 - y1)
+        sx: int = 1 if x1 < x2 else -1
+        sy: int = 1 if y1 < y2 else -1
+        err: int = dx - dy
 
-if __name__ == "__main__":
-    main()
+        while True:
+            if 0 <= x1 < self.max_x.value - 1 and 0 <= y1 < self.max_y.value - 1:
+                sdl2.SDL_RenderDrawPoint(self.renderer, x1, y1)
+
+            if x1 == x2 and y1 == y2:
+                break
+            e2: int = err * 2
+            if e2 > -dy:
+                err -= dy
+                x1 += sx
+            if e2 < dx:
+                err += dx
+                y1 += sy
+
+    def clear(self) -> None:
+        sdl2.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255)
+        sdl2.SDL_RenderClear(self.renderer)
+
+    def refresh(self) -> None:
+        sdl2.SDL_RenderPresent(self.renderer)

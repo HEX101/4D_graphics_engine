@@ -1,11 +1,16 @@
-import curses
-import itertools
 import math
-from typing import Callable, Dict, Optional
+import sys
+import time
+from typing import Dict, Tuple
 
 import numpy as np
+import sdl2
 from numpy.typing import NDArray
 
+from renderer import Renderer
+from shape_def import Shape
+
+FRAMES_PER_SECOND = 60
 
 class Projection:
     def __init__(self, max_x: int, max_y: int) -> None:
@@ -13,6 +18,16 @@ class Projection:
         self.max_y = max_y
         
     def project_vertices(self, vertices: NDArray[np.float64], position: NDArray[np.float64]) -> NDArray[np.int_]:
+        """
+        Projects N-dimensional vertices onto a 2D plane.
+
+        Args:
+            vertices (NDArray[np.float64]): Array of N-dimensional vertex coordinates (n, N).
+            position (NDArray[np.float64]): N-dimensional reference position (N,).
+
+        Returns:
+            NDArray[np.int_]: Array of projected 2D coordinates (n, 2).
+        """
         dimension_to_project_to: int = 2
 
         num_vertices = vertices.shape[0]
@@ -33,198 +48,185 @@ class Projection:
 
         return projected_vertices.astype(np.int_)
 
-class Renderer:
-    def __init__(self, stdscr: curses.window) -> None:
-        self.stdscr = stdscr
-        self.max_y, self.max_x = stdscr.getmaxyx()
-        curses.curs_set(0)
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
-        self.stdscr.nodelay(True)
-        self.stdscr.keypad(True)
+class Rotation:
+    def __init__(self, n: int) -> None:
+        """
+        Initialize Rotation for N dimensions.
 
-    def draw_edges(self, projected: NDArray[np.int_], edges: NDArray[np.int_]) -> None:
-        for e in edges:
-            if e[0] >= len(projected) or e[1] >= len(projected):
-                continue
-
-            v1 = projected[e[0]]
-            v2 = projected[e[1]]
-
-            self.draw_line(v1, v2)
-                    
-    def draw_line(self, v1: NDArray[np.int_], v2: NDArray[np.int_]) -> None:
-        x1, y1 = v1[0], v1[1]
-        x2, y2 = v2[0], v2[1]
-
-        dx: int = abs(x2 - x1)
-        dy: int = abs(y2 - y1)
-        sx: int = 1 if x1 < x2 else -1
-        sy: int = 1 if y1 < y2 else -1
-        err: int = dx - dy
-
-        while True:
-            if 0 <= x1 < self.max_x - 1 and 0 <= y1 < self.max_y - 1:
-                self.stdscr.addch(y1, x1, ".", curses.color_pair(1))
-
-            if x1 == x2 and y1 == y2:
-                break
-            e2: int = err * 2
-            if e2 > -dy:
-                err -= dy
-                x1 += sx
-            if e2 < dx:
-                err += dx
-                y1 += sy
-
-    def clear(self) -> None:
-        self.stdscr.clear()
-
-    def refresh(self) -> None:
-        self.stdscr.refresh()
-
-class Shape:
-    def __init__(self, vertices: NDArray[np.float64], edges: NDArray[np.int_]) -> None:
-        self.vertices: NDArray[np.float64] = vertices
-        self.edges: NDArray[np.int_] = edges
-            
-    @staticmethod
-    def define_n_dimensional_cube(n: int) -> 'Shape':        
-        vertices = np.array(list(itertools.product([-1, 1], repeat=n)), dtype=np.float64)
-
-        edges = []
-        dimension = vertices.shape[1]
-        
-        vertex_to_index = {tuple(vertex): idx for idx, vertex in enumerate(vertices)}
-        
-        for idx, vertex in enumerate(vertices):
-            for dim in range(dimension):
-                neighbor = vertex.copy()
-                neighbor[dim] *= -1
-                neighbor_tuple = tuple(neighbor)
-                neighbor_idx = vertex_to_index.get(neighbor_tuple)
-                if neighbor_idx is not None and neighbor_idx > idx:
-                    edges.append((idx, neighbor_idx))
-        
-        edges_array = np.array(edges, dtype=np.int_)
-
-        return Shape(vertices, edges_array)
-
-class Rotation: # generlize to apply to n dimensions
-    def __init__(self, yaw: float = 0.0, pitch: float = 0.0, roll: float = 0.0) -> None:
-        self.yaw = yaw                  # Rotation around YZ plane
-        self.pitch = pitch              # Rotation around XZ plane
-        self.roll = roll                # Rotation around XY plane
+        Args:
+            n (int): Number of dimensions
+        """
+        self.n = n
+        self.rotation_angles: Dict[Tuple[int, int], float] = {}
         self.rotation_speed: float = math.pi / 16
         self.has_changed: bool = True
 
-    def rotate_camera(self, dtheta: float = 0.0, dphi: float = 0.0, dw: float = 0.0) -> None:
-        self.yaw += dtheta * self.rotation_speed
-        self.pitch += dphi * self.rotation_speed
-        self.has_changed = True 
+    def rotate_camera(self, plane: tuple[int, int], delta_angle: float) -> None:
+        """
+        Rotate the camera around a specified plane.
 
-    def rotate_y(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_theta: float = math.sin(self.yaw)
-        cos_theta: float = math.cos(self.yaw)
-        roty: NDArray[np.float64] = np.array([[cos_theta, 0, -sin_theta],
-                                             [0, 1, 0],
-                                             [sin_theta, 0, cos_theta]])
-        rotated_vertices: NDArray[np.float64] = np.dot(vertices, roty)
-        return rotated_vertices
+        Args:
+            plane (tuple[int, int]): ple of two axes indices defining the rotation plane.
+            delta_angle (float): Incremental angle to rotate.
+        """
+        if plane not in self.rotation_angles:
+            self.rotation_angles[plane] = 0.0
+        self.rotation_angles[plane] += delta_angle * self.rotation_speed
+        self.has_changed = True
 
-    def rotate_x(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_phi: float = math.sin(self.pitch)
-        cos_phi: float = math.cos(self.pitch)
-        rotx: NDArray[np.float64] = np.array([[1, 0, 0],
-                                             [0, cos_phi, -sin_phi],
-                                             [0, sin_phi, cos_phi]])
-        rotated_vertices: NDArray[np.float64] = np.dot(vertices, rotx)
-        return rotated_vertices
-    
-    def rotate_z(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        sin_psi: float = math.sin(self.roll)
-        cos_psi: float = math.cos(self.roll)
-        
-        rotz: NDArray[np.float64] = np.array([[cos_psi, -sin_psi, 0],
-                                            [sin_psi, cos_psi, 0],
-                                            [0, 0, 1, 0]])
-        rotated_vertices: NDArray[np.float64] = np.dot(vertices, rotz)
-        return rotated_vertices
+    def get_rotation_matrix(self) -> NDArray[np.float64]:
+        """
+        Compute the cumulative rotation matrix for all specified planes.
+
+        Returns:
+            NDArray[np.float64]: N x N rotation matrix.
+        """
+        rotation_matrix = np.identity(self.n)
+        for plane, angle in self.rotation_angles.items():
+            i, j = plane
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            rotation = np.identity(self.n)
+            rotation[i, i] = cos_a
+            rotation[i, j] = -sin_a
+            rotation[j, i] = sin_a
+            rotation[j, j] = cos_a
+            rotation_matrix = rotation_matrix @ rotation
+        return rotation_matrix
 
     def rotate(self, vertices: NDArray[np.float64]) -> NDArray[np.float64]:
-        rotated = self.rotate_y(vertices)
-        rotated = self.rotate_x(rotated)
-        return rotated
+        """
+        Apply all rotations to the vertices.
+
+        Args:
+            vertices (NDArray[np.float64]): Array of vertices with shape (num_vertices, N).
+
+        Returns:
+            NDArray[np.float64]: Rotated vertices.
+        """
+        rotation_matrix = self.get_rotation_matrix()
+        return vertices @ rotation_matrix
     
 class Position:
-    def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0) -> None:
-        self.coords: NDArray[np.float64] = np.array([x, y, z])
+    def __init__(self, n:int) -> None:
+        self.coords: NDArray[np.float64] = np.zeros((n,), dtype=np.float64)
+        self.coords[2] = 3.0
         self.movement_speed: float = 0.1
         self.has_changed: bool = True
-        
+                
     def move(self, direction_vector: NDArray[np.float64]) -> None:
         self.coords += direction_vector * self.movement_speed
         self.has_changed = True
-
-class InputHandler:         # generlize for n dimensions
+        
+class InputHandler:
     def __init__(self, position: Position, rotation: Rotation) -> None:
         self.position = position
         self.rotation = rotation
-        self.key_actions: Dict[int, Callable[[], None]] = {
-            ord('w'): lambda: self.rotation.rotate_camera(dphi=-1),  # Rotate up (pitch decrease)
-            ord('s'): lambda: self.rotation.rotate_camera(dphi=1),   # Rotate down (pitch increase)
-            ord('a'): lambda: self.rotation.rotate_camera(dtheta=1), # Rotate left (yaw increase)
-            ord('d'): lambda: self.rotation.rotate_camera(dtheta=-1),# Rotate right (yaw decrease)
-            ord('z'): lambda: self.position.move(np.array([0.0, 0.0, -1.0])),  # Move forward (Z axis)
-            ord('x'): lambda: self.position.move(np.array([0.0, 0.0, 1.0])),   # Move backward (Z axis)
-        }
+        self.key_actions = {
+            sdl2.SDLK_s: lambda: self.rotate_plane((1, 2),  1),
+            sdl2.SDLK_w: lambda: self.rotate_plane((1, 2), -1),
 
-    def handle_input(self, key: int) -> None:
-        action = self.key_actions.get(key)
-        if action:
-            action()
+            sdl2.SDLK_a: lambda: self.rotate_plane((0, 2),  1),
+            sdl2.SDLK_d: lambda: self.rotate_plane((0, 2), -1),
+
+            sdl2.SDLK_e: lambda: self.rotate_plane((0, 1),  1),
+            sdl2.SDLK_q: lambda: self.rotate_plane((0, 1), -1),
+            
+            sdl2.SDLK_x: self.move_forward,
+            sdl2.SDLK_z: self.move_backward,
+        }
+        self.keys_pressed: set[int] = set()
+
+    def handle_input(self, event: sdl2.SDL_Event) -> None:
+        if event.type == sdl2.SDL_QUIT:
+            self.quit()
+
+        if event.type == sdl2.SDL_KEYDOWN:
+            self.keys_pressed.add(event.key.keysym.sym)
+            self.perform_actions()
+
+        if event.type == sdl2.SDL_KEYUP:
+            self.keys_pressed.discard(event.key.keysym.sym)
+
+    def perform_actions(self) -> None:
+        for key in self.keys_pressed:
+            if key in self.key_actions:
+                self.key_actions[key]()
+
+    def rotate_plane(self, plane: tuple[int, int], direction: int) -> None:
+        """
+        Rotate around a specified plane.
+        
+        Args:
+            plane (tuple[int, int]): Tuple of two axis indices defining the rotation plane (e.g., (0, 1) for XY plane).
+            direction (int): Rotation direction. Use 1 for positive rotation and -1 for negative rotation.
+        """
+        self.rotation.rotate_camera(plane=plane, delta_angle=direction)
+
+    def move_forward(self) -> None:
+        self.position.move(np.array([0.0, 0.0, -1.0]))
+
+    def move_backward(self) -> None:
+        self.position.move(np.array([0.0, 0.0, 1.0]))
+
+    def quit(self) -> None:
+        sdl2.SDL_Quit()
+        sys.exit()
 
 class Application:
     def __init__(self, n: int) -> None:
+        """
+        Initialize the application. 
+
+        Args:
+            n (int): Number of dimensions.
+        """
         self.shape: Shape = Shape.define_n_dimensional_cube(n)
-        self.position: Position = Position(z=3)
-        self.rotation: Rotation = Rotation()
-        self.renderer: Optional[Renderer] = None
-        self.projection: Optional[Projection] = None
-        self.input_handler: Optional[InputHandler] = None
+        self.position: Position = Position(n)
+        self.rotation: Rotation = Rotation(n)
+        
+        sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO)
+        self.window = sdl2.SDL_CreateWindow(b"3D Projection", sdl2.SDL_WINDOWPOS_UNDEFINED, sdl2.SDL_WINDOWPOS_UNDEFINED, 800, 600, sdl2.SDL_WINDOW_SHOWN)
+        renderer = sdl2.SDL_CreateRenderer(self.window, -1, sdl2.SDL_RENDERER_ACCELERATED)
+        self.renderer: Renderer = Renderer(self.window, renderer)
+        self.projection = Projection(800, 600)
+        self.input_handler = InputHandler(self.position, self.rotation)
 
-    def run(self, stdscr: curses.window) -> None:
-        self.renderer = Renderer(stdscr)
-        self.projection = Projection(self.renderer.max_x, self.renderer.max_y)
-        self.input_handler = InputHandler(self.position, self. rotation)
-
+    def run(self) -> None:
+        frame_duration = 1 / FRAMES_PER_SECOND
         while True:
-            if self.position.has_changed or self.rotation.has_changed:
-                self.renderer.clear()
-                
-                stdscr.addstr(0, 0, f'X: {self.position.coords[0]:.2f}, Z: {self.position.coords[2]:.2f}', curses.color_pair(1))
-                stdscr.addstr(1, 0, f'Yaw: {round((self.rotation.yaw * (180 / math.pi) % 360), 2)}, Pitch: {round((self.rotation.pitch * (180 / math.pi) % 360), 2)}', curses.color_pair(1))
-                
-                rotated: NDArray[np.float64] = self.rotation.rotate(self.shape.vertices)
-                rotated[:, :2] -= self.position.coords[:2]
-                projected: NDArray[np.int_] = self.projection.project_vertices(
-                    rotated, self.position.coords
-                )
+            start_time = time.time()
+            self.clear_and_render()
+            self.handle_events()
+            elapsed_time = time.time() - start_time
+            time.sleep(max(0, frame_duration - elapsed_time))
 
-                self.renderer.draw_edges(projected, self.shape.edges)
-                self.position.has_changed, self.rotation.has_changed = False, False
-                
+    def clear_and_render(self) -> None:
+        self.renderer.clear()
+        if self.position.has_changed or self.rotation.has_changed:
+            self.update_rendering()
+            self.renderer.refresh()
 
-                self.renderer.refresh()
+    def update_rendering(self) -> None:
+        rotated = self.rotation.rotate(self.shape.vertices)
+        rotated[:, :2] -= self.position.coords[:2]
+        projected = self.projection.project_vertices(rotated, self.position.coords)
+        self.renderer.draw_edges(projected, self.shape.edges)
+        self.position.has_changed, self.rotation.has_changed = False, False
 
-            key: int = stdscr.getch()
-            if key == ord('n'):
+    def handle_events(self) -> None:
+        while True:
+            event = sdl2.SDL_Event()
+            if not sdl2.SDL_PollEvent(event):
                 break
-            self.input_handler.handle_input(key)
+            self.input_handler.handle_input(event)
             
 def main() -> None:
     app = Application(n=3)
-    curses.wrapper(app.run)
+    app.run()
+    sdl2.SDL_DestroyRenderer(app.renderer)
+    sdl2.SDL_DestroyWindow(app.window)
+    sdl2.SDL_Quit()
 
 if __name__ == "__main__":
     main()
